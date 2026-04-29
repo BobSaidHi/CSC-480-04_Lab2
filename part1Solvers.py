@@ -156,13 +156,18 @@ def proof_by_unsat():
     x, y = Ints('x y')
     s = Solver()
 
-    # TODO: YOUR CODE HERE
+    # DONE: YOUR CODE HERE
+    # s.add(Implies(y > 0, (x + y) > x)) # The actual formula
+    # Formula for contradiction
+    s.add(Not(Implies(y > 0, (x + y) > x)))
 
     match s.check():
         case z3.unsat:
             print(
                 "The formula is UNSAT, meaning no contradiction can be found. "
                 "Therefore the original formula must always be true.  QED.")
+        case z3.sat:
+            print("This was not supposed to be satisfiable")
 
 
 """
@@ -182,8 +187,20 @@ def demorgans_proof():
         is false, with counterexample given by: " and the model that shows
         the formula to be false.
         """
-        # TODO: YOUR CODE HERE
-        pass
+
+        # DONE: YOUR CODE HERE
+        s = Solver()
+        s.add(Not(f))
+
+        match s.check():
+            case z3.unsat:
+                print(
+                    "No counterexample can be found, therefore the statement "
+                    "is true")
+            case z3.sat:
+                print(
+                    f"The formula f is false, with counterexample given by: "
+                    f"{s.model()}")
 
     prove(demorgan)
 
@@ -220,7 +237,55 @@ def wedding_planning():
     or
         "There is no acceptable seating arraignment"
     """
-    # TODO: YOUR CODE HERE
+    # DONE: YOUR CODE HERE
+
+    # Amusing non-solution because I accident defined the chairs as free variables:
+    #  [BobPos = -2,
+    #  AlicePos = 2,
+    #  MiddleChair = 2,
+    #  CharliePos = 0,
+    #  RightChair = -2,
+    #  LeftChair = 0]
+    LeftChair = 0
+    MiddleChair = 1
+    RightChair = 2
+
+    AlicePos = Int('AlicePos')
+    BobPos = Int('BobPos')
+    CharliePos = Int('CharliePos')
+
+    s = Solver()
+
+    # Chairs must be distinct
+    # s.add(LeftChair != MiddleChair)  
+    # s.add(LeftChair != RightChair)
+    # s.add(MiddleChair != RightChair)
+
+    s.add(Or(AlicePos == LeftChair, AlicePos == MiddleChair,
+             AlicePos == RightChair))  # Alice must sit in one of the chairs
+    s.add(Or(BobPos == LeftChair, BobPos == MiddleChair,
+             BobPos == RightChair))  # Bob must sit in one of the chairs
+    s.add(Or(CharliePos == LeftChair, CharliePos == MiddleChair,
+             CharliePos == RightChair))  # Charlie must sit in one of the chairs
+
+    # May not sit in the same chair
+    s.add(AlicePos != BobPos)  
+    s.add(AlicePos != CharliePos)
+    s.add(BobPos != CharliePos)
+
+    s.add(AlicePos + 1 != CharliePos)  # Alice does not sit right of Charlie
+    s.add(AlicePos - 1 != CharliePos)  # Alice does not sit left of Charlie
+
+    s.add(AlicePos != LeftChair)  # Alice does not sit on the leftmost chair
+
+    s.add(BobPos + 1 != CharliePos)  # Bob does not sit right of Charlie
+
+    match s.check():
+        case z3.sat:
+            model = s.model()
+            print(model)
+        case z3.unsat:
+            print("There is no acceptable seating arraignment")
 
 
 """
