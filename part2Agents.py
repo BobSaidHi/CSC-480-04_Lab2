@@ -40,8 +40,8 @@ class PuzzleWizard(WizardAgent):
         # Describe path
         print("Describing path with z3 variables...")
         minPathLen = len(fire_stones) * 2 + len(ice_stones) * 2 + 1
-        pathLen = grid_size[0] * grid_size[1]
-        for pathLen in range(minPathLen, pathLen):
+            maxLen = grid_size[0] * grid_size[1]
+            for pathLen in range(minPathLen, maxLen):
             print("Trying path length: ", pathLen)
             problemPath = []
             for i in range(pathLen):
@@ -53,7 +53,7 @@ class PuzzleWizard(WizardAgent):
                 r2, c2 = problemPath[i + 1]
 
                 # Each step may involve one move (Cardinal directions only)
-                print("Adding movement constraints for step ", i)
+                # print("Adding movement constraints for step ", i)
                 s.add(Or(
                     And(r2 == r1 + 1, c2 == c1),  # DOWN
                     And(r2 == r1 - 1, c2 == c1),  # UP
@@ -69,19 +69,21 @@ class PuzzleWizard(WizardAgent):
             ))
             
             # Stay in bounds
+            print("Adding bounds constraints")
             for i in range(pathLen):
                 r1, c1 = problemPath[i]
 
-                print("Adding bounds constraints for step ", i)
+                # print("Adding bounds constraints for step ", i)
                 s.add(And(r1 >= 0, r1 < grid_size[0], c1 >= 0, c1 < grid_size[1]))
             
             # Don't revisit locations
+            print("Adding non-revisiting constraints")
             for i in range(pathLen - 1):
                 for j in range(i + 1, pathLen - 1):
                     r1, c1 = problemPath[i]
                     r2, c2 = problemPath[j]
 
-                    print("Adding non-revisiting constraint for steps ", i, " and ", j)
+                    # print("Adding non-revisiting constraint for steps ", i, " and ", j)
                     s.add(Or(r1 != r2, c1 != c2))
 
             # Return to start
@@ -106,6 +108,8 @@ class PuzzleWizard(WizardAgent):
                     And(getRowDelta(i) != 0, getColDelta(i) == 0, getRowDelta(j) == 0, getColDelta(j) != 0),
                 )
 
+            # Fire stone constraints
+            print("Adding fire stone constraints...")
             for stone_loc in fire_stones:
                 stonesOnPath = []
 
@@ -113,7 +117,7 @@ class PuzzleWizard(WizardAgent):
                 for i in range(pathLen):
                     r, c = problemPath[i]
                     stonesOnPath.append(And(r == stone_loc.row, c == stone_loc.col))
-                print("Adding fire stone constraint for stone at ", stone_loc)
+                # print("Adding fire stone constraint for stone at ", stone_loc)
                 s.add(Or(*stonesOnPath))
 
                 # Must move straight through fire stones (no turns)
@@ -128,13 +132,15 @@ class PuzzleWizard(WizardAgent):
                     ))
                 s.add(Or(*fireStones))
 
-            # Must visit all ice stones
+            # Ice stone constraints
+            print("Adding ice stone constraints...")
             for stone_loc in ice_stones:
+                # Must visit all ice stones
                 stonesOnPath = []
                 for i in range(pathLen):
                     r, c = problemPath[i]
                     stonesOnPath.append(And(r == stone_loc.row, c == stone_loc.col))
-                print("Adding ice stone constraint for stone at ", stone_loc)
+                # print("Adding ice stone constraint for stone at ", stone_loc)
                 s.add(Or(*stonesOnPath))
 
                 # Must turn on ice stones (no straight moves)
