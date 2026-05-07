@@ -317,7 +317,7 @@ def sudoku(puzzle):
     Use print_sudoku to print your solution to puzzle or otherwise print "The
     puzzle is impossible.".
     """
-    # WIP: YOUR CODE HERE
+    # DONE: YOUR CODE HERE
     s = Solver()
 
     # Build 2D Array
@@ -416,4 +416,31 @@ def coin_sum(total):
 
     Hint: You may need to run many related but slightly different model checks.
     """
-    # TODO: YOUR CODE HERE
+    # DONE: YOUR CODE HERE
+    s = Solver()
+
+    # Can't have negative coins, apparently this a variadic function
+    s.add(p >= 0, n >= 0, d >= 0, q >= 0, f >= 0, c >= 0) 
+
+    # Add algebraic constraint for total
+    s.add(p + 5 * n + 10 * d + 25 * q + 50 * f + 100 * c == total)
+
+    # Could really use a three clause for loop here, although I guess I would still want
+    # to declare i one scope higher: for(int i = 0; s.check() == z3.sat; i++)
+    i = 0
+    while s.check() == z3.sat:
+        i += 1
+        model = s.model()
+        print(model)
+
+        # Don't revisit this model
+        nVal = model.evaluate(n).as_long()
+        dVal = model.evaluate(d).as_long()
+        pVal = model.evaluate(p).as_long()
+        qVal = model.evaluate(q).as_long()
+        fVal = model.evaluate(f).as_long()
+        cVal = model.evaluate(c).as_long()
+
+        s.add(Not(And(n == nVal, d == dVal, p == pVal, q == qVal, f == fVal, c == cVal))) 
+
+    print(f"Total number of ways: {i}")

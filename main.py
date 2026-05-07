@@ -10,8 +10,8 @@ def main():
     # part1Solvers.proof_by_unsat()
     # part1Solvers.demorgans_proof()
     # part1Solvers.wedding_planning()
-    part1Solvers.sudoku(part1Solvers.instance)
-
+    # part1Solvers.sudoku(part1Solvers.instance)
+    part1Solvers.coin_sum(100)
 
 
 if __name__ == "__main__":
