@@ -35,14 +35,15 @@ class PuzzleWizard(WizardAgent):
             return self.solution.pop(0)
 
         # Else: Solve
-        s = Solver()
 
         # Describe path
         print("Describing path with z3 variables...")
         minPathLen = len(fire_stones) * 2 + len(ice_stones) * 2 + 1
-            maxLen = grid_size[0] * grid_size[1]
-            for pathLen in range(minPathLen, maxLen):
+        maxPathLen = grid_size[0] * grid_size[1]
+        for pathLen in range(minPathLen, maxPathLen):
             print("Trying path length: ", pathLen)
+            s = Solver()
+            
             problemPath = []
             for i in range(pathLen):
                 problemPath.append((Int(f"r_{i}"), Int(f"c_{i}")))
