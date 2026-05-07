@@ -326,11 +326,13 @@ def sudoku(puzzle):
     # but it seems to only be in scripting languages
     z3List: list[list[z3.ArithRef]] = []
     for i in range(len(puzzle)):
+        puzzleRow: list[z3.ArithRef] = []
         for j in range(len(puzzle[i])):
-            z3List[i][j] = Int(f'arr_{i}_{j}')
+            puzzleRow.append(Int(f'arr_{i}_{j}'))
             if (puzzle[i][j] != 0):
                 # Added already solved constraint
-                s.add(z3List[i][j] == puzzle[i][j])
+                s.add(puzzleRow[j] == puzzle[i][j])
+        z3List.append(puzzleRow)
 
     # Add row and column constraints
     # TODO: I might have confused rows and columns and/or row-major v. column
@@ -365,9 +367,13 @@ def sudoku(puzzle):
         case z3.sat:
             model = s.model()
             print(model)
+            print("Puzzle:")
             print_sudoku(puzzle)
+                    solvedRow.append(int(str(model.evaluate(z3List[i][j]))))
+                solved.append(solvedRow)
+            print_sudoku(solved)
         case z3.unsat:
-            print("There is no acceptable seating arraignment")
+            print("The puzzle is impossible.")
 
 
 instance = ((0, 0, 0, 0, 9, 4, 0, 3, 0),
