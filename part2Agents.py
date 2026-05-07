@@ -104,61 +104,88 @@ class PuzzleWizard(WizardAgent):
                     visitedCount = visitedCount + If(n != 0, 1, 0)
                 s.add(Implies(cell != 0, visitedCount == 2))
 
-        # Be sure not to skip any stones
-        for col, row in fireStonePositions:
-            s.add(grid[col][row] != NOT_VISITED)
-        for col, row in iceStonePositions:
-            s.add(grid[col][row] != NOT_VISITED)
+        # neighbor directionality Rules
 
-        # Actually follow the fire turns and ice straights
-        def getDirection(cell1, cell2):
-            """Get direction from cell1 to cell2: 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT"""
-            c1, r1 = cell1
-            c2, r2 = cell2
-            if c2 > c1:
-                return 0  # RIGHT
-            elif c2 < c1:
-                return 1  # LEFT
-            elif r2 > r1:
-                return 2  # DOWN
-            else:
-                return 3  # UP
+        # Masyu Rules using neighbor directionality
+        # For fire stones: neighbors must be perpendicular (one vertical, one horizontal)
+        # For ice stones: neighbors must be collinear (both horizontal or both vertical)
 
-        # For each fire stone, enforce turn rule (3 consecutive positions must show a direction change)
         for fireCol, fireRow in fireStonePositions:
-            neighbors = []
+            # Get valid neighbors
+            neighborsList = []
             if fireCol > 0:
-                neighbors.append((fireCol - 1, fireRow))
+                neighborsList.append((fireCol - 1, fireRow))
             if fireCol < grid_size[1] - 1:
-                neighbors.append((fireCol + 1, fireRow))
+                neighborsList.append((fireCol + 1, fireRow))
             if fireRow > 0:
-                neighbors.append((fireCol, fireRow - 1))
+                neighborsList.append((fireCol, fireRow - 1))
             if fireRow < grid_size[0] - 1:
-                neighbors.append((fireCol, fireRow + 1))
+                neighborsList.append((fireCol, fireRow + 1))
 
-            # Fire stone must have exactly 2 neighbors that are marked
-            fireNeighborCount = 0
-            for nc, nr in neighbors:
-                fireNeighborCount = fireNeighborCount + If(grid[nc][nr] != 0, 1, 0)
+            # Fire stone must have exactly 2 marked neighbors
+            markedNeighbors = [grid[nc][nr] for nc, nr in neighborsList]
+            fireNeighborCount = sum([If(n != 0, 1, 0) for n in markedNeighbors])
             s.add(fireNeighborCount == 2)
 
-        # For each ice stone, enforce straight rule (must go straight through, turn on sides)
-        for iceCol, iceRow in iceStonePositions:
-            neighbors = []
-            if iceCol > 0:
-                neighbors.append(((iceCol - 1, iceRow), "left"))
-            if iceCol < grid_size[1] - 1:
-                neighbors.append(((iceCol + 1, iceRow), "right"))
-            if iceRow > 0:
-                neighbors.append(((iceCol, iceRow - 1), "up"))
-            if iceRow < grid_size[0] - 1:
-                neighbors.append(((iceCol, iceRow + 1), "down"))
+            # Fire rule: neighbors must be perpendicular
+            # If we have 2 neighbors, they must be in different directions (one col-aligned, one row-aligned)
+            horizontalNeighbors = []
+            verticalNeighbors = []
 
-            # Ice stone must have exactly 2 neighbors
-            iceNeighborCount = 0
-            for (nc, nr), _ in neighbors:
-                iceNeighborCount = iceNeighborCount + If(grid[nc][nr] != 0, 1, 0)
+            for nc, nr in neighborsList:
+                if nr == fireRow:  # Same row = horizontal neighbor
+                    horizontalNeighbors.append((nc, nr))
+                if nc == fireCol:  # Same column = vertical neighbor
+                    verticalNeighbors.append((nc, nr))
+
+            # Fire stone needs at least one horizontal and one vertical marked neighbor
+            if horizontalNeighbors and verticalNeighbors:
+                hNarked = Or(*[grid[nc][nr] != 0 for nc, nr in horizontalNeighbors])
+                vMarked = Or(*[grid[nc][nr] != 0 for nc, nr in verticalNeighbors])
+                s.add(And(hNarked, vMarked))
+
+        # For ice stones: neighbors must be collinear (straight through or turn on sides)
+        for iceCol, iceRow in iceStonePositions:
+            neighborsList = []
+            if iceCol > 0:
+                neighborsList.append((iceCol - 1, iceRow))
+            if iceCol < grid_size[1] - 1:
+                neighborsList.append((iceCol + 1, iceRow))
+            if iceRow > 0:
+                neighborsList.append((iceCol, iceRow - 1))
+            if iceRow < grid_size[0] - 1:
+                neighborsList.append((iceCol, iceRow + 1))
+
+            # Ice stone must have exactly 2 marked neighbors
+            markedNeighbors = [grid[nc][nr] for nc, nr in neighborsList]
+            iceNeighborCount = sum([If(n != 0, 1, 0) for n in markedNeighbors])
             s.add(iceNeighborCount == 2)
+
+            # Ice rule: neighbors must be collinear (both horizontal OR both vertical)
+            horizontalNeighbors = []
+            verticalNeighbors = []
+
+            for nc, nr in neighborsList:
+                if nr == iceRow:  # Same row = horizontal
+                    horizontalNeighbors.append((nc, nr))
+                if nc == iceCol:  # Same column = vertical
+                    verticalNeighbors.append((nc, nr))
+
+            # Either both horizontal or both vertical marked
+            hNarked = [grid[nc][nr] != 0 for nc, nr in horizontalNeighbors]
+            vMarked = [grid[nc][nr] != 0 for nc, nr in verticalNeighbors]
+
+            if hNarked:
+                bothH = And(*hNarked) if len(hNarked) == 2 else hNarked[0]
+            else:
+                bothH = False
+
+            if vMarked:
+                bothV = And(*vMarked) if len(vMarked) == 2 else vMarked[0]
+            else:
+                bothV = False
+
+            s.add(Or(bothH, bothV))
 
         # Solve
         match s.check():
