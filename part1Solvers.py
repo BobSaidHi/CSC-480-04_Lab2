@@ -324,18 +324,20 @@ def sudoku(puzzle):
     # @details Apparently the weird for loop inside other things is called
     # generator expressions or comprehension and has been in Python since 2.4
     # but it seems to only be in scripting languages
+    # Note: Values must be between 1 and 9
     z3List: list[list[z3.ArithRef]] = []
     for i in range(len(puzzle)):
         puzzleRow: list[z3.ArithRef] = []
         for j in range(len(puzzle[i])):
             puzzleRow.append(Int(f'arr_{i}_{j}'))
+            s.add(And(puzzleRow[j] >= 1, puzzleRow[j] <= 9))
             if (puzzle[i][j] != 0):
                 # Added already solved constraint
                 s.add(puzzleRow[j] == puzzle[i][j])
         z3List.append(puzzleRow)
 
     # Add row and column constraints
-    # TODO: I might have confused rows and columns and/or row-major v. column
+    # DONE?: I might have confused rows and columns and/or row-major v. column
     #  major order
     # @details iterate over cols
     for i in range(len(puzzle)):
@@ -366,9 +368,12 @@ def sudoku(puzzle):
     match s.check():
         case z3.sat:
             model = s.model()
-            print(model)
             print("Puzzle:")
             print_sudoku(puzzle)
+            solved: list[list[int]] = []
+            for i in range(len(puzzle)):
+                solvedRow: list[int] = []
+                for j in range(len(puzzle[i])):
                     solvedRow.append(int(str(model.evaluate(z3List[i][j]))))
                 solved.append(solvedRow)
             print_sudoku(solved)
