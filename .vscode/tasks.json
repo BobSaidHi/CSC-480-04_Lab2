@@ -1,0 +1,56 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Masyu1 (Simple Agent)",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "run.py",
+                "--agent",
+                "simple",
+                "--map",
+                "masyu1",
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Masyu2 (Spell Agent)",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "run.py",
+                "--agent",
+                "spell",
+                "--map",
+                "masyu2",
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Masyu3 (Simple Agent)",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "run.py",
+                "--agent",
+                "simple",
+                "--map",
+                "masyu3",
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        }
+    ]
+}
