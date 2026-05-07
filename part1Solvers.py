@@ -239,7 +239,8 @@ def wedding_planning():
     """
     # DONE: YOUR CODE HERE
 
-    # Amusing non-solution because I accident defined the chairs as free variables:
+    # Amusing non-solution because I accident defined the chairs as free
+    # variables:
     #  [BobPos = -2,
     #  AlicePos = 2,
     #  MiddleChair = 2,
@@ -269,7 +270,7 @@ def wedding_planning():
              CharliePos == RightChair))  # Charlie must sit in one of the chairs
 
     # May not sit in the same chair
-    s.add(AlicePos != BobPos)  
+    s.add(AlicePos != BobPos)
     s.add(AlicePos != CharliePos)
     s.add(BobPos != CharliePos)
 
@@ -316,7 +317,57 @@ def sudoku(puzzle):
     Use print_sudoku to print your solution to puzzle or otherwise print "The
     puzzle is impossible.".
     """
-    # TODO: YOUR CODE HERE
+    # WIP: YOUR CODE HERE
+    s = Solver()
+
+    # Build 2D Array
+    # @details Apparently the weird for loop inside other things is called
+    # generator expressions or comprehension and has been in Python since 2.4
+    # but it seems to only be in scripting languages
+    z3List: list[list[z3.ArithRef]] = []
+    for i in range(len(puzzle)):
+        for j in range(len(puzzle[i])):
+            z3List[i][j] = Int(f'arr_{i}_{j}')
+            if (puzzle[i][j] != 0):
+                # Added already solved constraint
+                s.add(z3List[i][j] == puzzle[i][j])
+
+    # Add row and column constraints
+    # TODO: I might have confused rows and columns and/or row-major v. column
+    #  major order
+    # @details iterate over cols
+    for i in range(len(puzzle)):
+        # Add row constraints
+        # @details Apparently * unpacks a list
+        s.add(Distinct(*z3List[i]))
+
+    # Add column constraints
+    # @details iterate over rows
+    for j in range(len(puzzle[0])):  # Assume square
+        col: list[z3.ArithRef] = []
+        # @details iterate over cols
+        for i in range(len(puzzle)):
+            col.append(z3List[i][j])
+        s.add(Distinct(*col))
+
+    # Add box constraints
+    # @details Iterate over 3x3 boxes
+    for boxI in range(len(puzzle) // 3):
+        for boxJ in range(len(puzzle[0]) // 3):
+            # @details Iterate over rows and cols in box
+            boxPart: list[z3.ArithRef] = []
+            for i in range(3):
+                for j in range(3):
+                    boxPart.append(z3List[boxI * 3 + i][boxJ * 3 + j])
+            s.add(Distinct(*boxPart))
+    
+    match s.check():
+        case z3.sat:
+            model = s.model()
+            print(model)
+            print_sudoku(puzzle)
+        case z3.unsat:
+            print("There is no acceptable seating arraignment")
 
 
 instance = ((0, 0, 0, 0, 9, 4, 0, 3, 0),

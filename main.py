@@ -9,8 +9,8 @@ def main():
     # part1Solvers.integer_overflow()
     # part1Solvers.proof_by_unsat()
     # part1Solvers.demorgans_proof()
-    part1Solvers.wedding_planning()
-
+    # part1Solvers.wedding_planning()
+    part1Solvers.sudoku(part1Solvers.instance)
 
 
 
