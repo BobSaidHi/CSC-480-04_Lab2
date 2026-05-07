@@ -43,23 +43,26 @@ class PuzzleWizard(WizardAgent):
         for pathLen in range(minPathLen, maxPathLen):
             print("Trying path length: ", pathLen)
             s = Solver()
-            
+
             problemPath = []
             for i in range(pathLen):
-                problemPath.append((Int(f"r_{i}"), Int(f"c_{i}")))
+                rowZ3Int, colZ3Int = Int(f"r_{pathLen}_{i}"), Int(f"c_{pathLen}_{i}")
+                cellZ3Int = Int(f"cell_{pathLen}_{i}")
+                problemPath.append((rowZ3Int, colZ3Int, cellZ3Int))
+                s.add(cellZ3Int == rowZ3Int * grid_size[1] + colZ3Int)
                 
             # Build constraints
             for i in range(pathLen - 1):
-                r1, c1 = problemPath[i]
-                r2, c2 = problemPath[i + 1]
+                row1, col1, cell1 = problemPath[i]
+                row2, col2, cell2 = problemPath[i + 1]
 
                 # Each step may involve one move (Cardinal directions only)
                 # print("Adding movement constraints for step ", i)
                 s.add(Or(
-                    And(r2 == r1 + 1, c2 == c1),  # DOWN
-                    And(r2 == r1 - 1, c2 == c1),  # UP
-                    And(r2 == r1, c2 == c1 + 1),  # RIGHT
-                    And(r2 == r1, c2 == c1 - 1),  # LEFT
+                    And(row2 == row1 + 1, cell2 == col1),  # DOWN
+                    And(row2 == row1 - 1, cell2 == col1),  # UP
+                    And(row2 == row1, cell2 == col1 + 1),  # RIGHT
+                    And(row2 == row1, cell2 == col1 - 1),  # LEFT
                 ))
 
             # Start from the wizard's initial location
@@ -72,26 +75,27 @@ class PuzzleWizard(WizardAgent):
             # Stay in bounds
             print("Adding bounds constraints")
             for i in range(pathLen):
-                r1, c1 = problemPath[i]
+                row1, col1, cell1 = problemPath[i]
 
                 # print("Adding bounds constraints for step ", i)
-                s.add(And(r1 >= 0, r1 < grid_size[0], c1 >= 0, c1 < grid_size[1]))
+                s.add(And(row1 >= 0, row1 < grid_size[0], col1 >= 0, col1 < grid_size[1]))
             
             # Don't revisit locations
             print("Adding non-revisiting constraints")
+            # Add by cell number to save on compute
+            cells = []
             for i in range(pathLen - 1):
                 for j in range(i + 1, pathLen - 1):
-                    r1, c1 = problemPath[i]
-                    r2, c2 = problemPath[j]
-
-                    # print("Adding non-revisiting constraint for steps ", i, " and ", j)
-                    s.add(Or(r1 != r2, c1 != c2))
-
+                    # print("Adding non-revisiting constraint for ", problemPath[i][2])
+                    cells.append(problemPath[i][2])
+            # Distinct is variadic, unpack the cells list into arguments
+            s.add(Distinct(*cells))
+                    
             # Return to start
-            rStart, cStart = problemPath[0]
-            rEnd, cEnd = problemPath[pathLen - 1]
+            rowStart, colStart, cellStart = problemPath[0]
+            rowEnd, colEnd, cellEnd = problemPath[pathLen - 1]
             print("Adding return to start constraint")
-            s.add(And(rEnd == rStart, cEnd == cStart))
+            s.add(And(rowEnd == rowStart, colEnd == colStart))
 
             # Helpers
             def getRowDelta(i):
@@ -116,8 +120,8 @@ class PuzzleWizard(WizardAgent):
 
                 # Must visit all fire stones
                 for i in range(pathLen):
-                    r, c = problemPath[i]
-                    stonesOnPath.append(And(r == stone_loc.row, c == stone_loc.col))
+                    row, col, cell = problemPath[i]
+                    stonesOnPath.append(And(row == stone_loc.row, col == stone_loc.col))
                 # print("Adding fire stone constraint for stone at ", stone_loc)
                 s.add(Or(*stonesOnPath))
 
@@ -139,8 +143,8 @@ class PuzzleWizard(WizardAgent):
                 # Must visit all ice stones
                 stonesOnPath = []
                 for i in range(pathLen):
-                    r, c = problemPath[i]
-                    stonesOnPath.append(And(r == stone_loc.row, c == stone_loc.col))
+                    row, col, cell = problemPath[i]
+                    stonesOnPath.append(And(row == stone_loc.row, col == stone_loc.col))
                 # print("Adding ice stone constraint for stone at ", stone_loc)
                 s.add(Or(*stonesOnPath))
 
@@ -162,7 +166,7 @@ class PuzzleWizard(WizardAgent):
             print("Solving with z3...")
             match s.check():
                 case z3.unsat:
-                    print("No solution found!")
+                    print("No solution found!\n")
                     continue
                     # return WizardMoves.STAY
                 case z3.sat:
@@ -199,7 +203,7 @@ class PuzzleWizard(WizardAgent):
                     
                     print("Returning first move: ", self.solution[0])
                     return self.solution.pop(0)
-        print("No solution found for any path length :(")
+        print("No solution found for any path length :(\n")
         return WizardMoves.STAY
 
 class SpellCastingPuzzleWizard(WizardAgent):
