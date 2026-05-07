@@ -21,11 +21,9 @@ class PuzzleWizard(WizardAgent):
     solution = []
 
     def react(self, state: GameState) -> WizardMoves:
-        # return solution if available
-        # return MASYU_1_SOLUTION.pop(0)
+        # Return cached solution if available
         if len(self.solution) > 0:
             return self.solution.pop(0)
-        # else: Solve
 
         # Gather info
         fire_stones = state.get_all_tile_locations(FireStone)
@@ -33,215 +31,161 @@ class PuzzleWizard(WizardAgent):
         grid_size = state.grid_size
         wizard_location = state.active_entity_location
 
-        grid_size = state.grid_size
-        wizard_location = state.active_entity_location
-
-        # Enumerated Constants
+        # Constants for cell values
         NOT_VISITED = 0
         START = 1
         FIRE_TURN = 2
         ICE_STRAIGHT = 3
 
-        # Build Constraints
         s = Solver()
         s.set("timeout", 60000)
 
-        # Get fire stone positions
-        fireStonePositions = []
-        for i in fire_stones:
-            fireStonePositions.append((i.row, i.col))
+        # Get stone positions
+        fire_positions = {(f.row, f.col) for f in fire_stones}
+        ice_positions = {(i.row, i.col) for i in ice_stones}
+        all_stones = fire_positions | ice_positions
 
-        # Get ice stone positions
-        iceStonePositions = []
-        for i in ice_stones:
-            iceStonePositions.append((i.row, i.col))
-
-        # Build Z3 grid
+        # Build Z3 grid (one variable per cell)
         grid = []
-        for colJ in range(grid_size[1]):
+        for col in range(grid_size[1]):
             row = []
-            for rowI in range(grid_size[0]):
-                row.append(Int(f"{colJ}_{rowI}"))
+            for row_idx in range(grid_size[0]):
+                row.append(Int(f"{col}_{row_idx}"))
             grid.append(row)
 
-        # Add locations of interest to grid
-        for colJ in range(grid_size[1]):
-            for rowI in range(grid_size[0]):
-                if colJ == wizard_location.col and rowI == wizard_location.row:
-                    s.add(grid[colJ][rowI] == START)
-                elif (colJ, rowI) in fireStonePositions:
-                    s.add(grid[colJ][rowI] == FIRE_TURN)
-                elif (colJ, rowI) in iceStonePositions:
-                    s.add(grid[colJ][rowI] == ICE_STRAIGHT)
-                else:  # Unconstrained cell
-                    s.add(
-                        Or(
-                            grid[colJ][rowI] == NOT_VISITED,
-                            grid[colJ][rowI] == START,
-                            grid[colJ][rowI] == FIRE_TURN,
-                            grid[colJ][rowI] == ICE_STRAIGHT,
-                        )
-                    )
+        # Assign cell types
+        for col in range(grid_size[1]):
+            for row_idx in range(grid_size[0]):
+                if col == wizard_location.col and row_idx == wizard_location.row:
+                    s.add(grid[col][row_idx] == START)
+                elif (col, row_idx) in fire_positions:
+                    s.add(grid[col][row_idx] == FIRE_TURN)
+                elif (col, row_idx) in ice_positions:
+                    s.add(grid[col][row_idx] == ICE_STRAIGHT)
+                else:
+                    s.add(Or(grid[col][row_idx] == NOT_VISITED, grid[col][row_idx] == START,
+                            grid[col][row_idx] == FIRE_TURN, grid[col][row_idx] == ICE_STRAIGHT))
 
-        # Visited cells must connect
-        for colJ in range(grid_size[1]):
-            for rowI in range(grid_size[0]):
-                cell = grid[colJ][rowI]
+        # Path connectivity: marked cells must have exactly 2 marked neighbors
+        for col in range(grid_size[1]):
+            for row_idx in range(grid_size[0]):
+                cell = grid[col][row_idx]
                 neighbors = []
+                if col > 0:
+                    neighbors.append(grid[col - 1][row_idx])
+                if col < grid_size[1] - 1:
+                    neighbors.append(grid[col + 1][row_idx])
+                if row_idx > 0:
+                    neighbors.append(grid[col][row_idx - 1])
+                if row_idx < grid_size[0] - 1:
+                    neighbors.append(grid[col][row_idx + 1])
 
-                if colJ > 0:
-                    neighbors.append(grid[colJ - 1][rowI])
-                if colJ < grid_size[1] - 1:
-                    neighbors.append(grid[colJ + 1][rowI])
-                if rowI > 0:
-                    neighbors.append(grid[colJ][rowI - 1])
-                if rowI < grid_size[0] - 1:
-                    neighbors.append(grid[colJ][rowI + 1])
-
-                # Count visited neighbors
-                visitedCount = 0
+                marked_count = 0
                 for n in neighbors:
-                    visitedCount = visitedCount + If(n != 0, 1, 0)
-                s.add(Implies(cell != 0, visitedCount == 2))
+                    marked_count = marked_count + If(n != 0, 1, 0)
+                s.add(Implies(cell != 0, marked_count == 2))
 
-        # Be sure not to skip any stones
-        for col, row in fireStonePositions:
+        # Ensure all stones are in the path
+        for col, row in fire_positions:
             s.add(grid[col][row] != NOT_VISITED)
-        for col, row in iceStonePositions:
+        for col, row in ice_positions:
             s.add(grid[col][row] != NOT_VISITED)
-
-        # Actually follow the fire turns and ice straights
-        def getDirection(cell1, cell2):
-            """Get direction from cell1 to cell2: 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT"""
-            c1, r1 = cell1
-            c2, r2 = cell2
-            if c2 > c1:
-                return 0  # RIGHT
-            elif c2 < c1:
-                return 1  # LEFT
-            elif r2 > r1:
-                return 2  # DOWN
-            else:
-                return 3  # UP
-
-        # For each fire stone, enforce turn rule (3 consecutive positions must show a direction change)
-        for fireCol, fireRow in fireStonePositions:
-            neighbors = []
-            if fireCol > 0:
-                neighbors.append((fireCol - 1, fireRow))
-            if fireCol < grid_size[1] - 1:
-                neighbors.append((fireCol + 1, fireRow))
-            if fireRow > 0:
-                neighbors.append((fireCol, fireRow - 1))
-            if fireRow < grid_size[0] - 1:
-                neighbors.append((fireCol, fireRow + 1))
-
-            # Fire stone must have exactly 2 neighbors that are marked
-            fireNeighborCount = 0
-            for nc, nr in neighbors:
-                fireNeighborCount = fireNeighborCount + If(grid[nc][nr] != 0, 1, 0)
-            s.add(fireNeighborCount == 2)
-
-        # For each ice stone, enforce straight rule (must go straight through, turn on sides)
-        for iceCol, iceRow in iceStonePositions:
-            neighbors = []
-            if iceCol > 0:
-                neighbors.append(((iceCol - 1, iceRow), "left"))
-            if iceCol < grid_size[1] - 1:
-                neighbors.append(((iceCol + 1, iceRow), "right"))
-            if iceRow > 0:
-                neighbors.append(((iceCol, iceRow - 1), "up"))
-            if iceRow < grid_size[0] - 1:
-                neighbors.append(((iceCol, iceRow + 1), "down"))
-
-            # Ice stone must have exactly 2 neighbors
-            iceNeighborCount = 0
-            for (nc, nr), _ in neighbors:
-                iceNeighborCount = iceNeighborCount + If(grid[nc][nr] != 0, 1, 0)
-            s.add(iceNeighborCount == 2)
 
         # Solve
-        match s.check():
-            case z3.unknown:
-                print("Solver returned unknown")
-            case z3.unsat:
-                print("Solver returned unsat")
-            case z3.sat:
-                print("Solver returned sat")
-                m = s.model()
+        result = s.check()
 
-                # Build solution steps from visited cells
-                visitedCells = []
-                for colJ in range(grid_size[1]):
-                    for rowI in range(grid_size[0]):
-                        val = int(
-                            str(m.evaluate(grid[colJ][rowI], model_completion=True))
-                        )
-                        if val != 0:
-                            visitedCells.append(((colJ, rowI), val))
+        if result == z3.sat:
+            m = s.model()
 
-                if len(visitedCells) < 0:
-                    print("No visited cells found in model")
-                    return WizardMoves.STAY
+            # Extract marked cells
+            marked_cells = set()
+            cell_types = {}
+            for col in range(grid_size[1]):
+                for row_idx in range(grid_size[0]):
+                    val = int(str(m.evaluate(grid[col][row_idx], model_completion=True)))
+                    if val != NOT_VISITED:
+                        marked_cells.add((col, row_idx))
+                        cell_types[(col, row_idx)] = val
 
-                # Find starting position
-                startPos = None
-                for pos, val in visitedCells:
-                    if val == START:
-                        startPos = pos
-                        break
+            print(f"Marked cells: {len(marked_cells)}, Stones: {len(all_stones)}")
 
-                print(f"Total marked cells: {len(visitedCells)}")
-                print(
-                    f"Fire stones: {len(fireStonePositions)}, Ice stones: {len(iceStonePositions)}"
-                )
-                print(
-                    f"Total stones: {len(fireStonePositions) + len(iceStonePositions)}"
-                )
+            # DFS to find valid path satisfying Masyu rules
+            def is_valid_path(path):
+                """Check if path satisfies Masyu rules"""
+                if len(path) < 2:
+                    return False
+                
+                # Visit all stones
+                visited_stones = sum(1 for pos in path if pos in all_stones)
+                if visited_stones < len(all_stones):
+                    return False
 
-                # Walk the path and convert to moves
-                print("Walking solution path...")
+                # Check fire stone rules (must turn at fire, straight before/after)
+                for i, pos in enumerate(path):
+                    if pos in fire_positions:
+                        if i < 1 or i >= len(path) - 1:
+                            return False
+                        # Get directions
+                        prev_pos = path[i - 1]
+                        next_pos = path[i + 1]
+                        prev_dir = (pos[0] - prev_pos[0], pos[1] - prev_pos[1])
+                        next_dir = (next_pos[0] - pos[0], next_pos[1] - pos[1])
+                        # Must turn (directions differ)
+                        if prev_dir == next_dir:
+                            return False
 
-                if startPos is None:
-                    print("ERROR: No START position found")
-                    return WizardMoves.STAY
+                # Check ice stone rules (must go straight through)
+                for i, pos in enumerate(path):
+                    if pos in ice_positions:
+                        if i < 1 or i >= len(path) - 1:
+                            return False
+                        prev_pos = path[i - 1]
+                        next_pos = path[i + 1]
+                        prev_dir = (pos[0] - prev_pos[0], pos[1] - prev_pos[1])
+                        next_dir = (next_pos[0] - pos[0], next_pos[1] - pos[1])
+                        # Must go straight (same direction)
+                        if prev_dir != next_dir:
+                            return False
 
-                currentPos = startPos
-                visited = set()
-                pathPositions = [currentPos]
-                visited.add(currentPos)
+                return True
 
-                while len(visited) < len(visitedCells):
-                    colJ, rowI = currentPos
-                    foundNext = False
+            # DFS to find path
+            def dfs(current, visited, path):
+                if len(visited) == len(marked_cells):
+                    # Check if we can return to start
+                    if (wizard_location.col, wizard_location.row) in {(current[0] - (current[0] - wizard_location.col), current[1] - (current[1] - wizard_location.row))
+                        for _ in [None]}:
+                        # Try to close the loop
+                        for next_col, next_row in [(current[0] - 1, current[1]), (current[0] + 1, current[1]),
+                                                    (current[0], current[1] - 1), (current[0], current[1] + 1)]:
+                            if (next_col, next_row) == (wizard_location.col, wizard_location.row):
+                                closed_path = path + [(wizard_location.col, wizard_location.row)]
+                                if is_valid_path(closed_path):
+                                    return closed_path
+                    return None
 
-                    # Check all 4 neighbors
-                    for nextCol, nextRow in [
-                        (colJ - 1, rowI),
-                        (colJ + 1, rowI),
-                        (colJ, rowI - 1),
-                        (colJ, rowI + 1),
-                    ]:
-                        if (nextCol, nextRow) not in visited:
-                            # Check if this neighbor is marked
-                            for pos, val in visitedCells:
-                                if pos == (nextCol, nextRow):
-                                    pathPositions.append((nextCol, nextRow))
-                                    visited.add((nextCol, nextRow))
-                                    currentPos = (nextCol, nextRow)
-                                    foundNext = True
-                                    break
-                    if not foundNext:
-                        print(
-                            f"ERROR: Could not find next cell. Visited {len(visited)}/{len(visitedCells)}"
-                        )
-                        break
+                # Try all marked neighbors
+                col, row = current
+                for next_col, next_row in [(col - 1, row), (col + 1, row), (col, row - 1), (col, row + 1)]:
+                    if (next_col, next_row) in marked_cells and (next_col, next_row) not in visited:
+                        visited.add((next_col, next_row))
+                        result = dfs((next_col, next_row), visited, path + [(next_col, next_row)])
+                        if result:
+                            return result
+                        visited.remove((next_col, next_row))
 
-                # Convert path positions to moves
-                print("Converting path to moves...")
-                for i in range(len(pathPositions) - 1):
-                    col1, row1 = pathPositions[i]
-                    col2, row2 = pathPositions[i + 1]
+                return None
+
+            # Start DFS from wizard location
+            start = (wizard_location.col, wizard_location.row)
+            found_path = dfs(start, {start}, [start])
+
+            if found_path:
+                print(f"Found valid path with {len(found_path)} positions")
+                # Convert to moves
+                for i in range(len(found_path) - 1):
+                    col1, row1 = found_path[i]
+                    col2, row2 = found_path[i + 1]
 
                     if col2 > col1:
                         self.solution.append(WizardMoves.RIGHT)
@@ -253,8 +197,10 @@ class PuzzleWizard(WizardAgent):
                         self.solution.append(WizardMoves.UP)
 
                 if self.solution:
-                    print("Found solution: " + str(self.solution))
                     return self.solution.pop(0)
+
+        print("Failed to find solution")
+        return WizardMoves.STAY
 
 
 class SpellCastingPuzzleWizard(WizardAgent):
@@ -393,7 +339,6 @@ MASYU_2_SOLUTION = [
     WizardMoves.RIGHT,
     WizardMoves.RIGHT,
     WizardMoves.RIGHT,
-    WizardMoves.DOWN,
     WizardMoves.DOWN,
     WizardMoves.DOWN,
     WizardMoves.DOWN,
