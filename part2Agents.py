@@ -135,6 +135,11 @@ class PuzzleWizard(WizardAgent):
 
                 # Walk the path and convert to moves
                 print("Walking solution path...")
+
+                if startPos is None:
+                    print("ERROR: No START position found")
+                    return WizardMoves.STAY
+
                 currentPos = startPos
                 visited = set()
                 pathPositions = [currentPos]
@@ -160,8 +165,11 @@ class PuzzleWizard(WizardAgent):
                                     currentPos = (nextCol, nextRow)
                                     foundNext = True
                                     break
-                        if foundNext:
-                            break
+                    if not foundNext:
+                        print(
+                            f"ERROR: Could not find next cell. Visited {len(visited)}/{len(visitedCells)}"
+                        )
+                        break
 
                 # Convert path positions to moves
                 print("Converting path to moves...")
