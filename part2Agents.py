@@ -21,185 +21,295 @@ class PuzzleWizard(WizardAgent):
     solution = []
 
     def react(self, state: GameState) -> WizardMoves:
-        # Return cached solution if available
+        # cached solution
         if len(self.solution) > 0:
             return self.solution.pop(0)
 
-        # Gather info
-        fire_stones = state.get_all_tile_locations(FireStone)
-        ice_stones = state.get_all_tile_locations(IceStone)
-        grid_size = state.grid_size
-        wizard_location = state.active_entity_location
+        # gather info
+        fireStones = state.get_all_tile_locations(FireStone)
+        iceStones = state.get_all_tile_locations(IceStone)
+        gridSize = state.grid_size
+        wizardLocation = state.active_entity_location
 
-        # Constants for cell values
-        NOT_VISITED = 0
-        START = 1
-        FIRE_TURN = 2
-        ICE_STRAIGHT = 3
+        firePositions = {(s.row, s.col) for s in fireStones}
+        icePositions = {(s.row, s.col) for s in iceStones}
+        allStonePositions = firePositions | icePositions
 
+        def inBounds(r, c):
+            return 0 <= r < gridSize[0] and 0 <= c < gridSize[1]
+
+        def neighbors(pos):
+            r, c = pos
+            ns = []
+            if inBounds(r - 1, c):
+                ns.append((r - 1, c))
+            if inBounds(r + 1, c):
+                ns.append((r + 1, c))
+            if inBounds(r, c - 1):
+                ns.append((r, c - 1))
+            if inBounds(r, c + 1):
+                ns.append((r, c + 1))
+            return ns
+
+        def dirBetween(a, b):
+            ar, ac = a
+            br, bc = b
+            if br < ar:
+                return "up"
+            if br > ar:
+                return "down"
+            if bc < ac:
+                return "left"
+            return "right"
+
+        def isTurn(a, b, c):
+            return dirBetween(a, b) != dirBetween(b, c)
+
+        def isStraight(a, b, c):
+            return dirBetween(a, b) == dirBetween(b, c)
+
+        # Build a connected-cycle Z3 model directly on grid edges.
         s = Solver()
         s.set("timeout", 60000)
 
-        # Get stone positions
-        fire_positions = {(f.row, f.col) for f in fire_stones}
-        ice_positions = {(i.row, i.col) for i in ice_stones}
-        all_stones = fire_positions | ice_positions
+        start = (wizardLocation.row, wizardLocation.col)
+        rows, cols = gridSize
 
-        # Build Z3 grid (one variable per cell)
-        grid = []
-        for col in range(grid_size[1]):
-            row = []
-            for row_idx in range(grid_size[0]):
-                row.append(Int(f"{col}_{row_idx}"))
-            grid.append(row)
+        openCells = []
+        for r in range(rows):
+            for c in range(cols):
+                tile = state.tile_grid[r][c]
+                if tile.__class__.__name__ != "Wall":
+                    openCells.append((r, c))
 
-        # Assign cell types
-        for col in range(grid_size[1]):
-            for row_idx in range(grid_size[0]):
-                if col == wizard_location.col and row_idx == wizard_location.row:
-                    s.add(grid[col][row_idx] == START)
-                elif (col, row_idx) in fire_positions:
-                    s.add(grid[col][row_idx] == FIRE_TURN)
-                elif (col, row_idx) in ice_positions:
-                    s.add(grid[col][row_idx] == ICE_STRAIGHT)
-                else:
-                    s.add(Or(grid[col][row_idx] == NOT_VISITED, grid[col][row_idx] == START,
-                            grid[col][row_idx] == FIRE_TURN, grid[col][row_idx] == ICE_STRAIGHT))
+        openSet = set(openCells)
+        if start not in openSet:
+            return WizardMoves.STAY
 
-        # Path connectivity: marked cells must have exactly 2 marked neighbors
-        for col in range(grid_size[1]):
-            for row_idx in range(grid_size[0]):
-                cell = grid[col][row_idx]
-                neighbors = []
-                if col > 0:
-                    neighbors.append(grid[col - 1][row_idx])
-                if col < grid_size[1] - 1:
-                    neighbors.append(grid[col + 1][row_idx])
-                if row_idx > 0:
-                    neighbors.append(grid[col][row_idx - 1])
-                if row_idx < grid_size[0] - 1:
-                    neighbors.append(grid[col][row_idx + 1])
+        def edgeKey(a, b):
+            return (a, b) if a < b else (b, a)
 
-                marked_count = 0
-                for n in neighbors:
-                    marked_count = marked_count + If(n != 0, 1, 0)
-                s.add(Implies(cell != 0, marked_count == 2))
+        edgeVars = {}
+        for (r, c) in openCells:
+            for (nr, nc) in neighbors((r, c)):
+                if (nr, nc) in openSet:
+                    k = edgeKey((r, c), (nr, nc))
+                    if k not in edgeVars:
+                        edgeVars[k] = Int(f"e_{k[0][0]}_{k[0][1]}_{k[1][0]}_{k[1][1]}")
+                        s.add(Or(edgeVars[k] == 0, edgeVars[k] == 1))
 
-        # Ensure all stones are in the path
-        for col, row in fire_positions:
-            s.add(grid[col][row] != NOT_VISITED)
-        for col, row in ice_positions:
-            s.add(grid[col][row] != NOT_VISITED)
+        selected = {}
+        for cell in openCells:
+            selected[cell] = Int(f"sel_{cell[0]}_{cell[1]}")
+            s.add(Or(selected[cell] == 0, selected[cell] == 1))
 
-        # Solve
-        result = s.check()
+        # Stones and start must be part of the loop.
+        s.add(selected[start] == 1)
+        for cell in allStonePositions:
+            if cell not in openSet:
+                return WizardMoves.STAY
+            s.add(selected[cell] == 1)
 
-        if result == z3.sat:
+        # Bound loop size to keep solving tractable.
+        totalSelected = z3.Sum([selected[c] for c in openCells])
+        s.add(totalSelected >= len(allStonePositions) + 1)
+        s.add(totalSelected <= min(len(openCells), 92))
+
+        def edgeVal(a, b):
+            if a not in openSet or b not in openSet:
+                return 0
+            k = edgeKey(a, b)
+            if k not in edgeVars:
+                return 0
+            return edgeVars[k]
+
+        # Degree is 2 for selected cells, 0 otherwise.
+        for cell in openCells:
+            degExpr = 0
+            for nb in neighbors(cell):
+                if nb in openSet:
+                    degExpr = degExpr + edgeVal(cell, nb)
+            s.add(degExpr == 2 * selected[cell])
+
+        # Connectivity is enforced lazily: solve, detect disconnected cycles, add cut constraints.
+        def continueStraightFromStone(stoneCell, dirR, dirC):
+            nr, nc = stoneCell[0] + dirR, stoneCell[1] + dirC
+            rr, rc = stoneCell[0] + 2 * dirR, stoneCell[1] + 2 * dirC
+            if (nr, nc) not in openSet or (rr, rc) not in openSet:
+                return 0
+            return edgeVal((nr, nc), (rr, rc))
+
+        # Masyu constraints matching game.py's checks.
+        for cell in firePositions:
+            up = edgeVal(cell, (cell[0] - 1, cell[1]))
+            down = edgeVal(cell, (cell[0] + 1, cell[1]))
+            left = edgeVal(cell, (cell[0], cell[1] - 1))
+            right = edgeVal(cell, (cell[0], cell[1] + 1))
+
+            # Fire: must turn at the stone.
+            s.add(up + down != 2)
+            s.add(left + right != 2)
+
+            # Fire: must be straight directly before and after the turn.
+            s.add(Implies(up == 1, continueStraightFromStone(cell, -1, 0) == 1))
+            s.add(Implies(down == 1, continueStraightFromStone(cell, 1, 0) == 1))
+            s.add(Implies(left == 1, continueStraightFromStone(cell, 0, -1) == 1))
+            s.add(Implies(right == 1, continueStraightFromStone(cell, 0, 1) == 1))
+
+        for cell in icePositions:
+            up = edgeVal(cell, (cell[0] - 1, cell[1]))
+            down = edgeVal(cell, (cell[0] + 1, cell[1]))
+            left = edgeVal(cell, (cell[0], cell[1] - 1))
+            right = edgeVal(cell, (cell[0], cell[1] + 1))
+
+            vertical = And(up == 1, down == 1)
+            horizontal = And(left == 1, right == 1)
+
+            # Ice: must go straight through.
+            s.add(Or(vertical, horizontal))
+
+            upCont = continueStraightFromStone(cell, -1, 0)
+            downCont = continueStraightFromStone(cell, 1, 0)
+            leftCont = continueStraightFromStone(cell, 0, -1)
+            rightCont = continueStraightFromStone(cell, 0, 1)
+
+            # Ice: must turn directly before or after.
+            s.add(Implies(vertical, Not(And(upCont == 1, downCont == 1))))
+            s.add(Implies(horizontal, Not(And(leftCont == 1, rightCont == 1))))
+
+        selectedEdges = set()
+        maxConnectivityCuts = 120
+        cutRound = 0
+        while cutRound < maxConnectivityCuts:
+            checkResult = s.check()
+            if checkResult != z3.sat:
+                print("Connected-cycle Z3 model unsat or timeout")
+                return WizardMoves.STAY
+
             m = s.model()
+            selectedEdges = set()
+            for (a, b), ev in edgeVars.items():
+                val = int(str(m.evaluate(ev, model_completion=True)))
+                if val == 1:
+                    selectedEdges.add((a, b))
 
-            # Extract marked cells
-            marked_cells = set()
-            cell_types = {}
-            for col in range(grid_size[1]):
-                for row_idx in range(grid_size[0]):
-                    val = int(str(m.evaluate(grid[col][row_idx], model_completion=True)))
-                    if val != NOT_VISITED:
-                        marked_cells.add((col, row_idx))
-                        cell_types[(col, row_idx)] = val
+            adj = {}
+            for cell in openCells:
+                adj[cell] = []
+            for (a, b) in selectedEdges:
+                adj[a].append(b)
+                adj[b].append(a)
 
-            print(f"Marked cells: {len(marked_cells)}, Stones: {len(all_stones)}")
+            # Build components over selected cells only.
+            selectedCells = set()
+            for cell in openCells:
+                if len(adj[cell]) > 0:
+                    selectedCells.add(cell)
 
-            # DFS to find valid path satisfying Masyu rules
-            def is_valid_path(path):
-                """Check if path satisfies Masyu rules"""
-                if len(path) < 2:
-                    return False
-                
-                # Visit all stones
-                visited_stones = sum(1 for pos in path if pos in all_stones)
-                if visited_stones < len(all_stones):
-                    return False
+            if start not in selectedCells:
+                s.add(selected[start] == 1)
+                cutRound += 1
+                continue
 
-                # Check fire stone rules (must turn at fire, straight before/after)
-                for i, pos in enumerate(path):
-                    if pos in fire_positions:
-                        if i < 1 or i >= len(path) - 1:
-                            return False
-                        # Get directions
-                        prev_pos = path[i - 1]
-                        next_pos = path[i + 1]
-                        prev_dir = (pos[0] - prev_pos[0], pos[1] - prev_pos[1])
-                        next_dir = (next_pos[0] - pos[0], next_pos[1] - pos[1])
-                        # Must turn (directions differ)
-                        if prev_dir == next_dir:
-                            return False
+            comps = []
+            seen = set()
+            for cell in selectedCells:
+                if cell in seen:
+                    continue
+                stack = [cell]
+                comp = set([cell])
+                seen.add(cell)
+                while stack:
+                    cur = stack.pop()
+                    for nb in adj[cur]:
+                        if nb not in seen:
+                            seen.add(nb)
+                            comp.add(nb)
+                            stack.append(nb)
+                comps.append(comp)
 
-                # Check ice stone rules (must go straight through)
-                for i, pos in enumerate(path):
-                    if pos in ice_positions:
-                        if i < 1 or i >= len(path) - 1:
-                            return False
-                        prev_pos = path[i - 1]
-                        next_pos = path[i + 1]
-                        prev_dir = (pos[0] - prev_pos[0], pos[1] - prev_pos[1])
-                        next_dir = (next_pos[0] - pos[0], next_pos[1] - pos[1])
-                        # Must go straight (same direction)
-                        if prev_dir != next_dir:
-                            return False
+            startComp = None
+            for comp in comps:
+                if start in comp:
+                    startComp = comp
+                    break
 
-                return True
+            if startComp is not None and allStonePositions.issubset(startComp) and len(comps) == 1:
+                break
 
-            # DFS to find path
-            def dfs(current, visited, path):
-                if len(visited) == len(marked_cells):
-                    # Check if we can return to start
-                    if (wizard_location.col, wizard_location.row) in {(current[0] - (current[0] - wizard_location.col), current[1] - (current[1] - wizard_location.row))
-                        for _ in [None]}:
-                        # Try to close the loop
-                        for next_col, next_row in [(current[0] - 1, current[1]), (current[0] + 1, current[1]),
-                                                    (current[0], current[1] - 1), (current[0], current[1] + 1)]:
-                            if (next_col, next_row) == (wizard_location.col, wizard_location.row):
-                                closed_path = path + [(wizard_location.col, wizard_location.row)]
-                                if is_valid_path(closed_path):
-                                    return closed_path
-                    return None
+            # Add subtour-elimination cuts for disconnected components not containing start.
+            for comp in comps:
+                if start in comp:
+                    continue
+                boundary = []
+                for cell in comp:
+                    for nb in neighbors(cell):
+                        if nb in openSet and nb not in comp:
+                            ev = edgeVal(cell, nb)
+                            if isinstance(ev, int):
+                                continue
+                            boundary.append(ev)
+                if len(boundary) == 0:
+                    print("Disconnected component cannot be connected; unsat")
+                    return WizardMoves.STAY
+                s.add(z3.Sum(boundary) >= 2)
 
-                # Try all marked neighbors
-                col, row = current
-                for next_col, next_row in [(col - 1, row), (col + 1, row), (col, row - 1), (col, row + 1)]:
-                    if (next_col, next_row) in marked_cells and (next_col, next_row) not in visited:
-                        visited.add((next_col, next_row))
-                        result = dfs((next_col, next_row), visited, path + [(next_col, next_row)])
-                        if result:
-                            return result
-                        visited.remove((next_col, next_row))
+            cutRound += 1
 
-                return None
+        if cutRound >= maxConnectivityCuts:
+            print("Failed to connect cycle components in time")
+            return WizardMoves.STAY
 
-            # Start DFS from wizard location
-            start = (wizard_location.col, wizard_location.row)
-            found_path = dfs(start, {start}, [start])
+        # Build cycle adjacency and walk once around the loop.
+        cycleAdj = {}
+        for c in openCells:
+            cycleAdj[c] = []
+        for (a, b) in selectedEdges:
+            cycleAdj[a].append(b)
+            cycleAdj[b].append(a)
 
-            if found_path:
-                print(f"Found valid path with {len(found_path)} positions")
-                # Convert to moves
-                for i in range(len(found_path) - 1):
-                    col1, row1 = found_path[i]
-                    col2, row2 = found_path[i + 1]
+        if len(cycleAdj[start]) != 2:
+            print("Z3 produced invalid start degree")
+            return WizardMoves.STAY
 
-                    if col2 > col1:
-                        self.solution.append(WizardMoves.RIGHT)
-                    elif col2 < col1:
-                        self.solution.append(WizardMoves.LEFT)
-                    elif row2 > row1:
-                        self.solution.append(WizardMoves.DOWN)
-                    elif row2 < row1:
-                        self.solution.append(WizardMoves.UP)
+        foundPath = [start]
+        prev = None
+        cur = start
+        safety = 0
+        while True:
+            safety += 1
+            if safety > len(openCells) + 5:
+                print("Failed to reconstruct cycle path")
+                return WizardMoves.STAY
 
-                if self.solution:
-                    return self.solution.pop(0)
+            nextOptions = cycleAdj[cur]
+            if len(nextOptions) != 2:
+                print("Invalid cycle degree during reconstruction")
+                return WizardMoves.STAY
 
-        print("Failed to find solution")
+            nxt = nextOptions[0] if nextOptions[0] != prev else nextOptions[1]
+            foundPath.append(nxt)
+            prev = cur
+            cur = nxt
+            if cur == start:
+                break
+
+        # convert to moves
+        for i in range(len(foundPath) - 1):
+            r1, c1 = foundPath[i]
+            r2, c2 = foundPath[i + 1]
+            if r2 < r1:
+                self.solution.append(WizardMoves.UP)
+            elif r2 > r1:
+                self.solution.append(WizardMoves.DOWN)
+            elif c2 < c1:
+                self.solution.append(WizardMoves.LEFT)
+            elif c2 > c1:
+                self.solution.append(WizardMoves.RIGHT)
+
+        if self.solution:
+            return self.solution.pop(0)
+
         return WizardMoves.STAY
 
 
