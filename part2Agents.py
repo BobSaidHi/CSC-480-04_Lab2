@@ -1,3 +1,5 @@
+from unittest import case
+
 from model import (
     Location,
     Wizard,
@@ -16,17 +18,174 @@ from z3 import Solver, Bool, Bools, Int, Ints, Or, Not, And, Implies, Distinct, 
 
 
 class PuzzleWizard(WizardAgent):
+    solution = []
+
     def react(self, state: GameState) -> WizardMoves:
+        # return solution if available
+        # return MASYU_1_SOLUTION.pop(0)
+        if len(self.solution) > 0:
+            return self.solution.pop(0)
+        # else: Solve
+
+        # Gather info
         fire_stones = state.get_all_tile_locations(FireStone)
         ice_stones = state.get_all_tile_locations(IceStone)
         grid_size = state.grid_size
         wizard_location = state.active_entity_location
 
-        # TODO: YOUR CODE HERE
-        return MASYU_1_SOLUTION.pop(0)
+        grid_size = state.grid_size
+        wizard_location = state.active_entity_location
+
+        # Enumerated Constants
+        NOT_VISITED = 0
+        START = 1
+        FIRE_TURN = 2
+        ICE_STRAIGHT = 3
+
+        # Build Constraints
+        s = Solver()
+        s.set("timeout", 60000)
+
+        # Get fire stone positions
+        fireStonePositions = []
+        for i in fire_stones:
+            fireStonePositions.append((i.row, i.col))
+
+        # Get ice stone positions
+        iceStonePositions = []
+        for i in ice_stones:
+            iceStonePositions.append((i.row, i.col))
+
+        # Build Z3 grid
+        grid = []
+        for colJ in range(grid_size[1]):
+            row = []
+            for rowI in range(grid_size[0]):
+                row.append(Int(f"{colJ}_{rowI}"))
+            grid.append(row)
+
+        # Add locations of interest to grid
+        for colJ in range(grid_size[1]):
+            for rowI in range(grid_size[0]):
+                if colJ == wizard_location.col and rowI == wizard_location.row:
+                    s.add(grid[colJ][rowI] == START)
+                elif (colJ, rowI) in fireStonePositions:
+                    s.add(grid[colJ][rowI] == FIRE_TURN)
+                elif (colJ, rowI) in iceStonePositions:
+                    s.add(grid[colJ][rowI] == ICE_STRAIGHT)
+                else:  # Unconstrained cell
+                    s.add(
+                        Or(
+                            grid[colJ][rowI] == NOT_VISITED,
+                            grid[colJ][rowI] == START,
+                            grid[colJ][rowI] == FIRE_TURN,
+                            grid[colJ][rowI] == ICE_STRAIGHT,
+                        )
+                    )
+
+        # Visited cells must connect
+        for colJ in range(grid_size[1]):
+            for rowI in range(grid_size[0]):
+                cell = grid[colJ][rowI]
+                neighbors = []
+
+                if colJ > 0:
+                    neighbors.append(grid[colJ - 1][rowI])
+                if colJ < grid_size[1] - 1:
+                    neighbors.append(grid[colJ + 1][rowI])
+                if rowI > 0:
+                    neighbors.append(grid[colJ][rowI - 1])
+                if rowI < grid_size[0] - 1:
+                    neighbors.append(grid[colJ][rowI + 1])
+
+                # Count visited neighbors
+                visitedCount = 0
+                for n in neighbors:
+                    visitedCount = visitedCount + If(n != 0, 1, 0)
+                s.add(Implies(cell != 0, visitedCount == 2))
+
+        # Solve
+        match s.check():
+            case z3.unknown:
+                print("Solver returned unknown")
+            case z3.unsat:
+                print("Solver returned unsat")
+            case z3.sat:
+                print("Solver returned sat")
+                m = s.model()
+
+                # Build solution steps from visited cells
+                visitedCells = []
+                for colJ in range(grid_size[1]):
+                    for rowI in range(grid_size[0]):
+                        val = int(str(m.evaluate(grid[colJ][rowI])))
+                        if val != 0:
+                            visitedCells.append(((colJ, rowI), val))
+
+                if len(visitedCells) < 0:
+                    print("No visited cells found in model")
+                    return WizardMoves.STAY
+
+                # Find starting position
+                startPos = None
+                for pos, val in visitedCells:
+                    if val == START:
+                        startPos = pos
+                        break
+
+                # Walk the path and convert to moves
+                print("Walking solution path...")
+                currentPos = startPos
+                visited = set()
+                pathPositions = [currentPos]
+                visited.add(currentPos)
+
+                while len(visited) < len(visitedCells):
+                    colJ, rowI = currentPos
+                    foundNext = False
+
+                    # Check all 4 neighbors
+                    for nextCol, nextRow in [
+                        (colJ - 1, rowI),
+                        (colJ + 1, rowI),
+                        (colJ, rowI - 1),
+                        (colJ, rowI + 1),
+                    ]:
+                        if (nextCol, nextRow) not in visited:
+                            # Check if this neighbor is marked
+                            for pos, val in visitedCells:
+                                if pos == (nextCol, nextRow):
+                                    pathPositions.append((nextCol, nextRow))
+                                    visited.add((nextCol, nextRow))
+                                    currentPos = (nextCol, nextRow)
+                                    foundNext = True
+                                    break
+                        if foundNext:
+                            break
+
+                # Convert path positions to moves
+                print("Converting path to moves...")
+                for i in range(len(pathPositions) - 1):
+                    col1, row1 = pathPositions[i]
+                    col2, row2 = pathPositions[i + 1]
+
+                    if col2 > col1:
+                        self.solution.append(WizardMoves.RIGHT)
+                    elif col2 < col1:
+                        self.solution.append(WizardMoves.LEFT)
+                    elif row2 > row1:
+                        self.solution.append(WizardMoves.DOWN)
+                    elif row2 < row1:
+                        self.solution.append(WizardMoves.UP)
+
+                if self.solution:
+                    print("Found solution: " + str(self.solution))
+                    return self.solution.pop(0)
 
 
 class SpellCastingPuzzleWizard(WizardAgent):
+    solution = []
+
     def react(self, state: GameState) -> GameAction:
         fire_stones = state.get_all_tile_locations(FireStone)
         ice_stones = state.get_all_tile_locations(IceStone)
@@ -36,7 +195,6 @@ class SpellCastingPuzzleWizard(WizardAgent):
         wizard_location = state.active_entity_location
 
         # TODO: YOUR CODE HERE
-        return MASYU_2_SOLUTION.pop(0)
 
 
 """
